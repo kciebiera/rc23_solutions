@@ -2,71 +2,63 @@ import mujoco
 from mujoco import viewer
 import numpy as np
 import time
-import imageio
 
-queue = []
 
 model = None
 data = None
 renderer = None
 viewer_window = None
-target = [0, -1.0, 1.1]
 
 
-def start_sim():
-    global model, data, viewer_window, renderer
+xml_path = "manipulator3d_ex.xml"
+model = mujoco.MjModel.from_xml_path(xml_path)
+data = mujoco.MjData(model)
+mujoco.mj_step(model, data)
+viewer_window = mujoco.viewer.launch_passive(model, data)
 
-    xml_path = "lab13-secret/manipulator3d.xml"
-    model = mujoco.MjModel.from_xml_path(xml_path)
-    renderer = mujoco.Renderer(model, height=480, width=640)
-    data = mujoco.MjData(model)
+
+def position_to_xyz(position):
+    position = position.round(1)
+    x = position[0]
+    y = position[2]
+    z = position[1]
+    return {"x": x, "y": y, "z": z}
+
+
+def check_pos(qpos):
+    data.qpos = qpos
     mujoco.mj_step(model, data)
-    viewer_window = mujoco.viewer.launch_passive(model, data)
-    data.ctrl[0] = -0.2
-    data.ctrl[1] = 0.2  # .00001
-    data.ctrl[2] = 0.2
-    for _ in range(100):
-        mujoco.mj_step(model, data)
-        renderer.update_scene(data)
-        viewer_window.sync()
-
-
-start_sim()
-time.sleep(5)
-
-
-def go_to(qpos):
-    data.ctrl = qpos
-    for i in range(10):
-        mujoco.mj_step(model, data)
-        renderer.update_scene(data)
-        frame = renderer.render()
-        if i == 0:
-            queue.append(frame)
-        viewer_window.sync()
-        if np.linalg.norm(data.qpos - qpos) < 0.0001:
-            break
-
-
-while viewer_window.is_running():
-    mujoco.mj_step(model, data)
-    renderer.update_scene(data)
     viewer_window.sync()
     position_Q = data.site_xpos[0]
+    return position_to_xyz(position_Q)
 
-    J = np.zeros((3, 3))
-    mujoco.mj_jac(model, data, J, None, position_Q, 3)
 
-    try:
-        Jinv = np.linalg.inv(J)
-    except:
-        print("Singular matrix")
-        continue
-    dX = target - position_Q
-    dq = Jinv.dot(dX)
-    go_to(data.qpos + 0.1 * dq)
+positions = [
+    [0, 0, 0],
+    [0, 0.5, 0],
+    [0, 0.5, np.pi / 2],
+    [np.pi / 2, 0.5, np.pi / 2],
+    [np.pi, 0.5, np.pi / 2],
+    [np.pi, 0.5, np.pi],
+]
 
-writer = imageio.get_writer("lab13-public/video.mp4", fps=20)
-for frame in queue:
-    writer.append_data(frame)
-writer.close()
+
+def fk(qpos):
+    data.qpos = qpos
+    theta_1 = qpos[0]
+    length_2 = qpos[1]
+    theta_3 = qpos[2]
+    position_Q = np.array(
+        [
+            1 / 2 * np.cos(theta_1) * np.sin(theta_3),
+            1 / 2 * np.cos(theta_3) + 1 / 2 + length_2,
+            1 / 2 * np.sin(theta_1) * np.sin(theta_3),
+        ]
+    ).round(1)
+
+    return {"x": position_Q[0], "y": position_Q[1], "z": position_Q[2]}
+
+
+for position in positions:
+    print(position, check_pos(position), fk(position))
+    time.sleep(1)
